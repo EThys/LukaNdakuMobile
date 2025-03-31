@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
 
+import 'package:luka_ndaku/screens/LoginPage.dart';
+
 class SplashScreen extends StatefulWidget {
   @override
   _SplashScreenState createState() => _SplashScreenState();
@@ -25,12 +27,7 @@ class _SplashScreenState extends State<SplashScreen>
     _controller = AnimationController(
       vsync: this,
       duration: Duration(seconds: 2),
-    )..addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _controller.reverse();
-        _controller.forward();
-      }
-    });
+    )..repeat(reverse: true);
 
     _scaleAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
       CurvedAnimation(
@@ -63,7 +60,7 @@ class _SplashScreenState extends State<SplashScreen>
     Future.delayed(Duration(seconds: 8), () {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => SplashScreen()),
+        MaterialPageRoute(builder: (context) => LoginPage()),
       );
     });
   }
@@ -143,7 +140,7 @@ class _SplashScreenState extends State<SplashScreen>
                         child: Column(
                           children: [
                             Text(
-                              'LukaNdakuNayo',
+                              'Loger Nga',
                               style: GoogleFonts.poppins(
                                 fontSize: 32,
                                 fontWeight: FontWeight.w700,
@@ -230,5 +227,7 @@ class _ParticlePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _ParticlePainter oldDelegate) {
+    return oldDelegate.animation.value != animation.value;
+  }
 }
