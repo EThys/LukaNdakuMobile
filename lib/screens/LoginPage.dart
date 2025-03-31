@@ -118,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    // Orange professional color scheme
+
     const primaryColor = Color(0xFFE53935); // Vibrant orange
     const secondaryColor = Color(0xFFC62828); // Light orange
     const backgroundColor = Colors.white;
@@ -136,30 +136,7 @@ class _LoginPageState extends State<LoginPage> {
           height: size.height,
           child: Stack(
             children: [
-              // Positioned(
-              //   bottom: -50,
-              //   left: -50,
-              //   child: Container(
-              //     width: 200,
-              //     height: 200,
-              //     decoration: BoxDecoration(
-              //       shape: BoxShape.circle,
-              //       color: primaryColor.withOpacity(0.1),
-              //     ),
-              //   ),
-              // ),
-              // Positioned(
-              //   top: -50,
-              //   right: -50,
-              //   child: Container(
-              //     width: 200,
-              //     height: 200,
-              //     decoration: BoxDecoration(
-              //       shape: BoxShape.circle,
-              //       color: primaryColor.withOpacity(0.1),
-              //     ),
-              //   ),
-              // ),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Column(
@@ -292,7 +269,7 @@ class _LoginPageState extends State<LoginPage> {
 
                               const SizedBox(height: 12),
 
-                              // Remember me + Forgot password - Improved layout
+
                               Row(
                                 children: [
                                   Expanded(
@@ -337,7 +314,7 @@ class _LoginPageState extends State<LoginPage> {
 
                               const SizedBox(height: 24),
 
-                              // Login button
+
                               ElevatedButton(
                                 onPressed: _isLoading ? null : _fakeLogin,
                                 style: ElevatedButton.styleFrom(
