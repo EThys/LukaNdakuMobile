@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:luka_ndaku/screens/RegisterPage.dart';
+import 'package:provider/provider.dart';
+import '../controllers/AuthentificationCtrl.dart';
+import '../utils/Routes.dart';
+import '../utils/networkCheck.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -17,6 +21,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _rememberMe = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _showPassword = false;
 
   @override
   void dispose() {
@@ -113,6 +118,171 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
+  bool _isProcessing = false;
+
+// 2. Modifiez votre méthode _submitForm pour gérer l'état
+  Future<void> _submitForm() async {
+    // Empêcher les clics multiples
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+
+    FocusScope.of(context).unfocus();
+
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showErrorSnackBar("Veuillez remplir tous les champs");
+      setState(() => _isProcessing = false);
+      return;
+    }
+
+    final isConnected = await NetworkUtils.checkInternetConnectivity();
+    if (!isConnected) {
+      _showErrorSnackBar("Pas de connexion internet");
+      setState(() => _isProcessing = false);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final userData = {
+        "email": _emailController.text.trim(),
+        "password": _passwordController.text.trim(),
+      };
+
+      final ctrl = context.read<AuthentificationCtrl>();
+      final res = await ctrl.login(userData);
+
+      if (!mounted) return;
+
+      if (res.status == true) {
+        _showSuccessSnackBar("Connexion réussie!");
+        await Future.delayed(const Duration(milliseconds: 1500));
+
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            Routes.bottomRoute,
+                (route) => false,
+          );
+        }
+      }  else {
+        // Gestion des erreurs spécifiques de l'API
+        String errorMessage = "Erreur de connexion";
+
+        if (res.data is Map<String, dynamic>) {
+          final responseData = res.data as Map<String, dynamic>;
+
+          // Cas 1: Email invalide (validation côté serveur)
+          if (responseData.containsKey('email')) {
+            errorMessage = "Veuillez entrer un email valide";
+          }
+          // Cas 2: Compte inexistant
+          else if (responseData['message'] == "Aucun compte trouvé avec cet email.") {
+            errorMessage = "Aucun compte trouvé avec cet email";
+          }
+          // Cas 3: Mot de passe incorrect
+          else if (responseData['message'] == "Mot de passe incorrect.") {
+            errorMessage = "Mot de passe incorrect";
+          }
+          // Cas 4: Autres messages d'erreur
+          else if (responseData.containsKey('message')) {
+            errorMessage = responseData['message'].toString();
+          }
+        }
+
+        _showModernSnackBar(
+          message: errorMessage,
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showErrorSnackBar("Erreur technique");
+      debugPrint("Login error: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isProcessing = false;
+        });
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(child: Center(child: Text(message))),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red[400],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(child: Center(child: Text(message))),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.green[400],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  String _translateApiErrorMessage(String message) {
+    return message
+        .replaceAll("Enter a valid email address.", "Veuillez entrer un email valide")
+        .replaceAll("This field may not be blank.", "Ce champ est obligatoire")
+        .replaceAll("Unable to log in with provided credentials.", "Identifiants incorrects")
+        .replaceAll("This field is required.", "Ce champ est obligatoire");
+  }
+
+  void _showModernSnackBar({required String message, required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        margin: const EdgeInsets.all(10),
+        backgroundColor: isError ? Colors.red[400] : Colors.green[400],
+        duration: const Duration(seconds: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+    );
+  }
+
+
+
+
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -313,20 +483,20 @@ class _LoginPageState extends State<LoginPage> {
                               ).animate().fadeIn(delay: 400.ms),
 
                               const SizedBox(height: 24),
-
-
                               ElevatedButton(
-                                onPressed: _isLoading ? null : _fakeLogin,
+                                onPressed: _isLoading || _isProcessing ? null : _submitForm,
                                 style: ElevatedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   elevation: 0,
-                                  backgroundColor: primaryColor,
+                                  backgroundColor: _isProcessing
+                                      ? primaryColor.withOpacity(0.7)
+                                      : primaryColor,
                                   foregroundColor: Colors.white,
                                 ),
-                                child: _isLoading
+                                child: _isLoading || _isProcessing
                                     ? const SizedBox(
                                   width: 20,
                                   height: 20,
@@ -342,7 +512,7 @@ class _LoginPageState extends State<LoginPage> {
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ).animate().fadeIn(delay: 500.ms),
+                              ),
 
                               const SizedBox(height: 24),
                             ],
