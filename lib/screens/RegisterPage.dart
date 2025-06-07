@@ -1,6 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
+import 'package:luka_ndaku/controllers/AuthentificationCtrl.dart';
+import 'package:luka_ndaku/utils/Routes.dart';
+import 'package:luka_ndaku/utils/networkCheck.dart';
+import 'package:provider/provider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
 class RegistrationPage extends StatefulWidget {
@@ -13,12 +20,15 @@ class RegistrationPage extends StatefulWidget {
 class _RegistrationPageState extends State<RegistrationPage> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 4;
+  final int _totalPages = 4; // Changé de 5 à 4 car on supprime les centres d'intérêt
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _isLoading = false;
+  bool _isSubmitting = false;
+  bool _isProcessing = false;
 
-  // Données du formulaire
+  // Form data
   final Map<String, dynamic> _formData = {
-    'nom': '',
+    'username': '',
     'postnom': '',
     'genre': null,
     'date_naissance': null,
@@ -28,7 +38,6 @@ class _RegistrationPageState extends State<RegistrationPage> {
     'ville': null,
     'profession': null,
     'password': '',
-
   };
 
   @override
@@ -57,197 +66,480 @@ class _RegistrationPageState extends State<RegistrationPage> {
     }
   }
 
-  void _submitForm() {
+  Future<void> _submitForm() async {
+    // Empêcher les soumissions multiples
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
 
+    // Fermer le clavier
+    FocusScope.of(context).unfocus();
 
-    print('Données du formulaire: $_formData');
+    try {
+      // 1. Validation des champs obligatoires
+      if (_formData['username']?.isEmpty ?? true ||
+          _formData['telephone']?.isEmpty ?? true ||
+          _formData['password']?.isEmpty ?? true) {
+        _showModernSnackBar(
+          message: "Veuillez remplir tous les champs obligatoires",
+          isError: true,
+        );
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      // 2. Validation du mot de passe
+      if (_formData['password']!.length < 8) {
+        _showModernSnackBar(
+          message: "Le mot de passe doit contenir au moins 8 caractères",
+          isError: true,
+        );
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      // 3. Vérification de la connexion internet
+      final isConnected = await NetworkUtils.checkInternetConnectivity();
+      if (!isConnected) {
+        _showModernSnackBar(
+          message: "Connexion internet requise",
+          isError: true,
+        );
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      setState(() {
+        _isLoading = true;
+        _isSubmitting = true; // Activer l'état de soumission
+      });
+
+      // 4. Préparation des données pour l'API
+      final registrationData = {
+        "username": _formData['username']!.trim(),
+        "postnom": _formData['postnom']?.trim(),
+        "genre": _formData['genre'],
+        "date_naissance": _formData['date_naissance'] != null
+            ? DateFormat('yyyy-MM-dd').format(_formData['date_naissance']!)
+            : null,
+        "telephone": _formData['telephone']!.trim(),
+        "email": _formData['email']?.trim(),
+        "pays": _formData['pays'],
+        "ville": _formData['ville'],
+        "profession": _formData['profession'],
+        "password": _formData['password']!,
+      };
+
+      // 5. Appel à l'API d'inscription
+      final ctrl = context.read<AuthentificationCtrl>();
+      final res = await ctrl.register(registrationData);
+
+      if (!mounted) return;
+
+      // 6. Vérification de la réponse
+      final isSuccess =
+          (res.data?['message']?.toString().toLowerCase().contains('utilisateur') ?? false);
+
+      if (isSuccess) {
+        _showSuccessSnackBar("Inscription réussie!");
+        await Future.delayed(const Duration(milliseconds: 1500));
+
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            Routes.loginRoute,
+                (route) => false,
+          );
+        }
+      } else {
+        // Gestion des erreurs améliorée
+        String errorMessage = "Erreur lors de l'inscription";
+        final responseData = res.data;
+
+        if (responseData is Map<String, dynamic>) {
+          if (responseData.containsKey('email') &&
+              responseData['email'].toString().contains("already exists")) {
+            errorMessage = "Un compte existe déjà avec cet email";
+          } else if (responseData.containsKey('telephone') &&
+              responseData['telephone'].toString().contains("already exists")) {
+            errorMessage = "Ce numéro de téléphone est déjà utilisé";
+          } else if (responseData.containsKey('message')) {
+            errorMessage = responseData['message'].toString();
+          }
+        }
+
+        _showModernSnackBar(
+          message: errorMessage,
+          isError: true,
+        );
+      }
+    } on TimeoutException catch (_) {
+      _showModernSnackBar(
+        message: "Temps écoulé, veuillez réessayer",
+        isError: true,
+      );
+    } catch (e) {
+      _showModernSnackBar(
+        message: "Erreur technique lors de l'inscription",
+        isError: true,
+      );
+      debugPrint("Registration error: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isProcessing = false;
+          _isSubmitting = false; // Désactiver l'état de soumission
+        });
+      }
+    }
+  }
+
+  void _showModernSnackBar({required String message, required bool isError}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Inscription réussie!'),
-        backgroundColor: const Color(0xFFE53935),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
         ),
+        margin: const EdgeInsets.all(10),
+        backgroundColor: isError ? Colors.red[400] : Colors.green[400],
+        duration: const Duration(seconds: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
     );
-    Navigator.pop(context);
+  }
+
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(child: Center(child: Text(message))),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.green[400],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(20),
+        child: Container(
+          padding: const EdgeInsets.all(30),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Lottie.asset(
+                'assets/success.json',
+                width: 150,
+                height: 150,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Inscription réussie!',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2E7D32),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Votre compte a été créé avec succès.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 25),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    // Navigate to home page
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Commencer',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red[400],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isLastPage = _currentPage == _totalPages - 1;
     const primaryColor = Color(0xFFE53935);
+    const secondaryColor = Color(0xFFEF5350);
 
     return Theme(
       data: ThemeData(
-        primaryColor: primaryColor,
-        colorScheme: ColorScheme.light(primary: primaryColor),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryColor,
-            foregroundColor: Colors.white,
+        colorScheme: ColorScheme.light(
+          primary: primaryColor,
+          secondary: secondaryColor,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.grey[50],
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
           ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE53935), width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
       ),
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: Colors.grey[50],
-        body: Stack(
-          children: [
-            Positioned(
-              bottom: -50,
-              left: -50,
-              child: Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: primaryColor.withOpacity(0.1),
-                ),
-              ),
-            ),
-            Positioned(
-              top: -50,
-              right: -50,
-              child: Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: primaryColor.withOpacity(0.1),
-                ),
-              ),
-            ),
-            Column(
-              children: [
-                const SizedBox(height: 50),
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-                  decoration: BoxDecoration(
-                    color: primaryColor.withOpacity(0.1),
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(20),
-                      bottomRight: Radius.circular(20),
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              // Background gradient
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.white, Color(0xFFFCE4EC)],
                     ),
                   ),
-                  child: Column(
-                    children: [
-                      SmoothPageIndicator(
+                ),
+              ),
+
+              Column(
+                children: [
+                  // Progress indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                    child: Column(
+                      children: [
+                        SmoothPageIndicator(
+                          controller: _pageController,
+                          count: _totalPages,
+                          effect: ExpandingDotsEffect(
+                            activeDotColor: primaryColor,
+                            dotColor: Colors.grey[300]!,
+                            dotHeight: 8,
+                            dotWidth: 8,
+                            expansionFactor: 3,
+                            spacing: 6,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Étape ${_currentPage + 1}/$_totalPages',
+                          style: const TextStyle(
+                            color: Color(0xFFE53935),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Form pages - Utilise Expanded avec un SingleChildScrollView
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 80), // Espace pour les boutons
+                      child: PageView(
                         controller: _pageController,
-                        count: _totalPages,
-                        effect: ExpandingDotsEffect(
-                          activeDotColor: primaryColor,
-                          dotColor: primaryColor.withOpacity(0.3),
-                          dotHeight: 8,
-                          dotWidth: 8,
-                          expansionFactor: 3,
-                        ),
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _PersonalInfoStep(formData: _formData),
+                          _ContactInfoStep(formData: _formData),
+                          _ProfessionalInfoStep(formData: _formData),
+                          _SecurityStep(formData: _formData),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Étape ${_currentPage + 1}/$_totalPages',
-                        style: const TextStyle(
-                          color: Color(0xFFE53935),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
+              ),
 
-                // Pages du formulaire
-                Expanded(
-                  child: PageView(
-                    controller: _pageController,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _PersonalInfoStep(formData: _formData),
-                      _ContactInfoStep(formData: _formData),
-                      _ProfessionalInfoStep(formData: _formData),
-                      _SecurityStep(formData: _formData),
-                      _PreferencesStep(formData: _formData),
-                    ],
+              // Navigation buttons - Positionné en bas avec SafeArea
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
                   ),
-                ),
-
-                // Boutons de navigation
-                Container(
-                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 15,
                         offset: const Offset(0, -5),
                       ),
                     ],
                   ),
-                  child: Row(
-                    children: [
-                      if (_currentPage > 0)
+                  child: SafeArea(
+                    top: false,
+                    minimum: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      children: [
+                        if (_currentPage > 0)
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _previousPage,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                side: const BorderSide(color: Color(0xFFE53935)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text(
+                                'Retour',
+                                style: TextStyle(
+                                  color: Color(0xFFE53935),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_currentPage > 0) const SizedBox(width: 12),
                         Expanded(
-                          child: OutlinedButton(
-                            onPressed: _previousPage,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              side: const BorderSide(color: Color(0xFFE53935)),
+                          child: ElevatedButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () {
+                              if (isLastPage) {
+                                _submitForm();
+                              } else {
+                                _nextPage();
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
+                              elevation: 0,
+                              backgroundColor: const Color(0xFFE53935),
+                              foregroundColor: Colors.white,
                             ),
-                            child: const Text(
-                              'Retour',
-                              style: TextStyle(color: Color(0xFFE53935)),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                                : Text(
+                              isLastPage ? 'Terminer' : 'Continuer',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                             ),
                           ),
                         ),
-                      if (_currentPage > 0) const SizedBox(width: 16),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            if (isLastPage) {
-                              _submitForm();
-                            } else {
-                              _nextPage();
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            isLastPage ? 'Terminer l\'inscription' : 'Continuer',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
 }
 
 class _PersonalInfoStep extends StatelessWidget {
   final Map<String, dynamic> formData;
   final _formKey = GlobalKey<FormState>();
-  final _nomController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _postnomController = TextEditingController();
   String? _selectedGenre;
   DateTime? _selectedDate;
 
   _PersonalInfoStep({required this.formData}) {
-    _nomController.text = formData['nom'] ?? '';
+    _usernameController.text = formData['username'] ?? '';
     _postnomController.text = formData['postnom'] ?? '';
     _selectedGenre = formData['genre'];
     _selectedDate = formData['date_naissance'];
@@ -255,8 +547,10 @@ class _PersonalInfoStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Form(
         key: _formKey,
         child: Column(
@@ -264,37 +558,26 @@ class _PersonalInfoStep extends StatelessWidget {
           children: [
             Text(
               'Informations personnelles',
-              style: TextStyle(
-                fontSize: 20,
+              style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
+                color: Colors.black87,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Renseignez vos informations de base',
-              style: TextStyle(
+              style: theme.textTheme.bodyMedium?.copyWith(
                 color: Colors.grey[600],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
             // Nom
             TextFormField(
-              controller: _nomController,
-              decoration: InputDecoration(
+              controller: _usernameController,
+              decoration: const InputDecoration(
                 labelText: 'Nom',
-                prefixIcon: const Icon(Iconsax.user),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder:  OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Color(0xFFE53935), width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.white,
+                prefixIcon: Icon(Iconsax.user),
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) {
@@ -302,26 +585,16 @@ class _PersonalInfoStep extends StatelessWidget {
                 }
                 return null;
               },
-              onChanged: (value) => formData['nom'] = value,
+              onChanged: (value) => formData['username'] = value,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
             // Postnom
             TextFormField(
               controller: _postnomController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Postnom',
-                prefixIcon: const Icon(Iconsax.user),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder:  OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Color(0xFFE53935), width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.white,
+                prefixIcon: Icon(Iconsax.user),
               ),
               validator: (value) {
                 if (value == null || value.isEmpty) {
@@ -331,24 +604,14 @@ class _PersonalInfoStep extends StatelessWidget {
               },
               onChanged: (value) => formData['postnom'] = value,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
             // Genre
             DropdownButtonFormField<String>(
               value: _selectedGenre,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Genre',
-                prefixIcon: const Icon(Iconsax.profile_2user),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder:  OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Color(0xFFE53935), width: 2),
-                ),
-                filled: true,
-                fillColor: Colors.white,
+                prefixIcon: Icon(Iconsax.profile_2user),
               ),
               items: const [
                 DropdownMenuItem(value: 'Homme', child: Text('Homme')),
@@ -365,27 +628,14 @@ class _PersonalInfoStep extends StatelessWidget {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
-            // Date de naissance
+            // Date de naissance - Format français
             TextFormField(
               readOnly: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Date de naissance',
-                prefixIcon: const Icon(Iconsax.calendar),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder:  OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Color(0xFFE53935), width: 2),
-                ),
-                hintText: _selectedDate == null
-                    ? 'Sélectionnez une date'
-                    : DateFormat('dd/MM/yyyy').format(_selectedDate!),
-                filled: true,
-                fillColor: Colors.white,
+                prefixIcon: Icon(Iconsax.calendar),
               ),
               onTap: () async {
                 final date = await showDatePicker(
@@ -393,18 +643,17 @@ class _PersonalInfoStep extends StatelessWidget {
                   initialDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
                   firstDate: DateTime(1900),
                   lastDate: DateTime.now().subtract(const Duration(days: 365 * 12)),
-                  locale: const Locale('fr', 'FR'),
                   builder: (context, child) {
                     return Theme(
                       data: Theme.of(context).copyWith(
                         colorScheme: ColorScheme.light(
-                          primary: const Color(0xFFE53935),
+                          primary: const Color(0xFFE53935), // Rouge
                           onPrimary: Colors.white,
-                          onSurface: Colors.grey[800]!,
+                          onSurface: Colors.black87,
                         ),
                         textButtonTheme: TextButtonThemeData(
                           style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFFE53935),
+                            foregroundColor: const Color(0xFFE53935), // Rouge
                           ),
                         ),
                       ),
@@ -424,7 +673,13 @@ class _PersonalInfoStep extends StatelessWidget {
                 }
                 return null;
               },
+              controller: TextEditingController(
+                text: _selectedDate == null
+                    ? null
+                    : DateFormat('dd/MM/yyyy', 'fr_FR').format(_selectedDate!), // Format français
+              ),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -518,7 +773,7 @@ class _ContactInfoStepState extends State<_ContactInfoStep> {
             TextFormField(
               controller: _emailController,
               decoration: InputDecoration(
-                labelText: 'Email (facultatif)',
+                labelText: 'Email',
                 prefixIcon: const Icon(Iconsax.sms),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -555,9 +810,6 @@ class _ContactInfoStepState extends State<_ContactInfoStep> {
               ),
               items: const [
                 DropdownMenuItem(value: 'RDC', child: Text('Congo Kinshasa')),
-                DropdownMenuItem(value: 'France', child: Text('France')),
-                DropdownMenuItem(value: 'Belgique', child: Text('Belgique')),
-                DropdownMenuItem(value: 'Autre', child: Text('Autre')),
               ],
               onChanged: (value) {
                 setState(() {
